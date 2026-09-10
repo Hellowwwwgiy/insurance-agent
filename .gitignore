@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+logs/
+*.log
+.vscode/
+.pytest_cache/
+.trae/
+*.egg-info/
+dist/
+build/
+.venv/
+# pytest / benchmark / eval 运行产物（每次跑自动生成，面试演示不需要 commit）
+tests/eval_baseline.json
+tests/eval_report.md
+tests/eval_judge_report.*
+tests/benchmark_report.*

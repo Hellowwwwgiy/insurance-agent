@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "insurance-agent"
+version = "0.1.0"
+description = "基于 LangChain + LangGraph 的保险行业 SQL 智能助手"
+readme = "readme.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain>=1.3,<2",
+    "langchain-core>=1.4,<2",
+    "langchain-openai>=1.3,<2",
+    "langgraph>=1.2,<2",
+    "openai>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "psycopg2-binary>=2.9",
+    "SQLAlchemy>=2.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+insurance-agent = "agent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

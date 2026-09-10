@@ -1,0 +1,44 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-insurance}
+      DB_PASSWORD: ${DB_PASSWORD:-insurance_pass}
+      DB_NAME: ${DB_NAME:-insurance_db}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_DIR: /app/logs
+      OBS_ENABLED: "true"
+    volumes:
+      - app-logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-insurance}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-insurance_pass}
+      POSTGRES_DB: ${DB_NAME:-insurance_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insurance} -d ${DB_NAME:-insurance_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  app-logs:

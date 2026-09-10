@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>保险 SQL 智能助手</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .container {
+    width: 100%;
+    max-width: 720px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.25);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 86vh;
+  }
+  .header {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    padding: 20px 24px;
+  }
+  .header h1 { font-size: 20px; font-weight: 600; }
+  .header p { font-size: 13px; opacity: .85; margin-top: 4px; }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    background: #f7f8fc;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .msg { max-width: 80%; padding: 12px 16px; border-radius: 14px; line-height: 1.6; word-wrap: break-word; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: #667eea; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: #fff; color: #333; border: 1px solid #e4e7ed; border-bottom-left-radius: 4px; }
+  .meta { font-size: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e4e7ed; display: flex; gap: 12px; flex-wrap: wrap; }
+  .badge { padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.ok { background: #e8f7ee; color: #2ba471; }
+  .badge.warn { background: #fff4e5; color: #d68500; }
+  .badge.retry { background: #eef1ff; color: #5b6bc1; }
+  .empty { text-align: center; color: #aaa; margin: auto; font-size: 14px; }
+
+  .input-area {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid #e4e7ed;
+    background: #fff;
+  }
+  #newchat {
+    width: 44px; flex-shrink: 0;
+    background: #f0f2f8; color: #667eea;
+    border: 1px solid #dcdfe6; border-radius: 10px;
+    font-size: 20px; cursor: pointer;
+  }
+  #newchat:hover { background: #e6e9f5; }
+  #question {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid #dcdfe6;
+    border-radius: 10px;
+    font-size: 14px;
+    outline: none;
+    resize: none;
+    font-family: inherit;
+    max-height: 120px;
+  }
+  #question:focus { border-color: #667eea; }
+  #send {
+    padding: 0 24px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .1s, opacity .2s;
+  }
+  #send:hover:not(:disabled) { transform: translateY(-1px); }
+  #send:disabled { opacity: .5; cursor: not-allowed; }
+
+  .typing { display: inline-flex; gap: 4px; align-items: center; }
+  .typing span { width: 7px; height: 7px; border-radius: 50%; background: #aaa; animation: blink 1.2s infinite both; }
+  .typing span:nth-child(2) { animation-delay: .2s; }
+  .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>🛡️ 保险 SQL 智能助手</h1>
+    <p>自然语言查询保险数据库 · 带事实校验</p>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="empty">输入问题，例如：「张三的保费是多少？」</div>
+  </div>
+
+  <div class="input-area">
+    <button id="newchat" onclick="newChat()" title="开启新会话">＋</button>
+    <textarea id="question" rows="1" placeholder="请输入您的问题..." oninput="autoResize(this)"></textarea>
+    <button id="send" onclick="sendQuery()">发送</button>
+  </div>
+</div>
+
+<script>
+const messagesEl = document.getElementById('messages');
+const input = document.getElementById('question');
+const sendBtn = document.getElementById('send');
+let sessionId = null;
+let streaming = false;
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function clearEmpty() {
+  const empty = messagesEl.querySelector('.empty');
+  if (empty) empty.remove();
+}
+
+function addUser(text) {
+  clearEmpty();
+  const div = document.createElement('div');
+  div.className = 'msg user';
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  scrollBottom();
+}
+
+function createBotMsg() {
+  const div = document.createElement('div');
+  div.className = 'msg bot';
+  const content = document.createElement('span');
+  content.className = 'content';
+  content.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
+  div.appendChild(content);
+  messagesEl.appendChild(div);
+  return { div, content };
+}
+
+function finalizeBot(div, { verified, attempts, error }) {
+  // 错误场景或 attempts=0（完全没跑过校验）不渲染事实校验徽章
+  if (error || !attempts) {
+    scrollBottom();
+    return;
+  }
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const v = document.createElement('span');
+  v.className = 'badge ' + (verified ? 'ok' : 'warn');
+  v.textContent = verified ? '✓ 事实校验通过' : '⚠ 未经事实校验';
+  const a = document.createElement('span');
+  a.className = 'badge retry';
+  a.textContent = `重试 ${attempts} 次`;
+  meta.appendChild(v); meta.appendChild(a);
+  div.appendChild(meta);
+  scrollBottom();
+}
+
+function scrollBottom() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function setLoading(loading) {
+  streaming = loading;
+  sendBtn.disabled = loading;
+  sendBtn.textContent = loading ? '思考中...' : '发送';
+}
+
+function newChat() {
+  if (streaming) return;
+  sessionId = null;
+  messagesEl.innerHTML = '<div class="empty">输入问题，例如：「张三的保费是多少？」</div>';
+  input.focus();
+}
+
+async function sendQuery() {
+  const q = input.value.trim();
+  if (!q || streaming) return;
+  addUser(q);
+  input.value = '';
+  input.style.height = 'auto';
+  setLoading(true);
+
+  const { div, content } = createBotMsg();
+  let cleared = false;
+  let finalMeta = { verified: false, attempts: 0 };
+
+  try {
+    const res = await fetch('/query/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q, session_id: sessionId })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let hadError = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (!payload) continue;
+        const ev = JSON.parse(payload);
+        if (ev.type === 'token') {
+          if (!cleared) { content.textContent = ''; cleared = true; }
+          content.textContent += ev.content;
+          scrollBottom();
+        } else if (ev.type === 'retry') {
+          if (!cleared) { content.textContent = ''; cleared = true; }
+          content.textContent += '\n\n🔄 检测到数据偏差，正在重新生成...\n\n';
+          scrollBottom();
+        } else if (ev.type === 'done') {
+          finalMeta = { verified: ev.verified, attempts: ev.attempts, error: false };
+        } else if (ev.type === 'error') {
+          hadError = true;
+          if (!cleared) { content.textContent = ''; cleared = true; }
+          content.textContent += '\n\n❌ ' + ev.message;
+        } else if (ev.type === 'session') {
+          sessionId = ev.session_id;
+        }
+      }
+    }
+    if (!cleared) content.textContent = '(无响应内容)';
+    finalizeBot(div, finalMeta);
+  } catch (e) {
+    if (!cleared) content.textContent = '';
+    content.textContent += '❌ 查询失败：' + e.message;
+    finalizeBot(div, { verified: false, attempts: 0, error: true });
+  } finally {
+    setLoading(false);
+    input.focus();
+  }
+}
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuery(); }
+});
+input.focus();
+</script>
+</body>
+</html>
