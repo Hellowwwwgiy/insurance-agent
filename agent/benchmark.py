@@ -153,10 +153,10 @@ async def _bench_offline(
         llm = _Scripted(responses=script)
         engine = create_engine("sqlite:///:memory:")
         with engine.begin() as conn:
-            conn.execute(text("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, city TEXT)"))
-            conn.execute(text("CREATE TABLE policies (policy_no TEXT PRIMARY KEY, customer_id INTEGER, product TEXT, premium REAL, status TEXT)"))
-            conn.execute(text("INSERT INTO customers VALUES (1, '张三', '13800138000', '北京朝阳')"))
-            conn.execute(text("INSERT INTO policies VALUES ('P001', 1, '安心健康保', 3200.0, 'active')"))
+            conn.execute(text("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, phone TEXT, address TEXT, age INTEGER)"))
+            conn.execute(text("CREATE TABLE policies (id INTEGER PRIMARY KEY, policy_no TEXT UNIQUE NOT NULL, customer_id INTEGER NOT NULL, product TEXT, premium REAL, insured_amount REAL, status TEXT DEFAULT 'active', start_date TEXT, end_date TEXT)"))
+            conn.execute(text("INSERT INTO customers VALUES (1, '张三', '13800138000', '北京朝阳', 32)"))
+            conn.execute(text("INSERT INTO policies VALUES (1, 'P001', 1, '安心健康保', 3200.0, 500000.0, 'active', '2025-01-01', '2045-01-01')"))
         agent_logger = _logging.getLogger(f"bench-{id(engine)}")
         agent_logger.setLevel(_logging.WARNING)  # 压测时只打 warning+，避免日志刷屏
         agent_logger.addHandler(_logging.NullHandler())

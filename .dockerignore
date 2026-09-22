@@ -9,3 +9,11 @@ __pycache__/
 dist/
 build/
 .venv/
+tests/
+docker/
+run.bat
+run.ps1
+stop.bat
+stop.ps1
+*.log
+.run_test*

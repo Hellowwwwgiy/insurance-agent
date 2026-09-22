@@ -264,64 +264,86 @@ class ScriptedChatModel(BaseChatModel):
 
 @pytest.fixture
 def sqlite_engine():
-    """保险风格的内存 sqlite 数据库（customers + policies 双表，可 JOIN）—— 300 customers + 300 policies（原始 3 行种子 + 297 批量生成，保留张三/李四/王五不被破坏）"""
+    """内存 SQLite，schema 与 docker/init.sql（PostgreSQL）完全对齐。
+    customers(id, name, phone, address, age)
+    policies(id, policy_no, customer_id, product, premium, insured_amount, status, start_date, end_date)
+    3 行种子 + 297 批量客户 + ~350 批量保单。
+    """
     import random
-    random.seed(42)  # 固定种子保证测试可重复
+    random.seed(42)
 
     engine = create_engine("sqlite:///:memory:")
     with engine.begin() as conn:
-        # --- 建表 ---
-        conn.execute(text(
-            "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, city TEXT)"
-        ))
-        conn.execute(text(
-            "CREATE TABLE policies (policy_no TEXT PRIMARY KEY, customer_id INTEGER, product TEXT, premium REAL, status TEXT)"
-        ))
+        conn.execute(text("""
+            CREATE TABLE customers (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                phone TEXT,
+                address TEXT,
+                age INTEGER
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE policies (
+                id INTEGER PRIMARY KEY,
+                policy_no TEXT UNIQUE NOT NULL,
+                customer_id INTEGER NOT NULL,
+                product TEXT,
+                premium REAL,
+                insured_amount REAL,
+                status TEXT DEFAULT 'active',
+                start_date TEXT,
+                end_date TEXT
+            )
+        """))
 
-        # --- 种子数据（3 行，Eval 测试硬编码依赖，不能改）---
+        # 种子（与 init.sql 一致）
         seed_customers = [
-            {"id": 1, "name": '张三', "phone": '13800138000', "city": '北京市朝阳区'},
-            {"id": 2, "name": '李四', "phone": '13900139999', "city": '青岛市市北区'},
-            {"id": 3, "name": '王五', "phone": '13700137777', "city": '上海市浦东新区'},
+            {"id": 1, "name": '张三', "phone": '13800138000', "addr": '北京市朝阳区', "age": 32},
+            {"id": 2, "name": '李四', "phone": '13900139999', "addr": '上海市浦东新区', "age": 28},
+            {"id": 3, "name": '王五', "phone": '13700137777', "addr": '广州市天河区', "age": 45},
         ]
         seed_policies = [
-            {"pn": 'P20250405001', "cid": 1, "prod": '安心健康保', "prem": 3200.0, "st": 'active'},
-            {"pn": 'P20250405002', "cid": 2, "prod": '终身寿险', "prem": 5200.0, "st": 'active'},
-            {"pn": 'P20250405003', "cid": 1, "prod": '意外险', "prem": 880.0, "st": 'expired'},
+            {"id": 1, "pn": 'P20250405001', "cid": 1, "prod": '安心健康保', "prem": 3200.00, "ia": 500000.00, "st": 'active',  "sd": '2025-04-05', "ed": '2045-04-04'},
+            {"id": 2, "pn": 'P20250405002', "cid": 1, "prod": '终身寿险',   "prem": 3000.00, "ia": 800000.00, "st": 'active',  "sd": '2024-01-15', "ed": '2074-01-14'},
+            {"id": 3, "pn": 'P20250405003', "cid": 3, "prod": '综合意外险', "prem": 1800.00, "ia": 300000.00, "st": 'expired', "sd": '2023-06-01', "ed": '2024-05-31'},
         ]
-        conn.execute(text("INSERT INTO customers VALUES (:id, :name, :phone, :city)"), seed_customers)
-        conn.execute(text("INSERT INTO policies VALUES (:pn, :cid, :prod, :prem, :st)"), seed_policies)
+        conn.execute(text("INSERT INTO customers (id, name, phone, address, age) VALUES (:id,:name,:phone,:addr,:age)"), seed_customers)
+        conn.execute(text("INSERT INTO policies (id, policy_no, customer_id, product, premium, insured_amount, status, start_date, end_date) VALUES (:id,:pn,:cid,:prod,:prem,:ia,:st,:sd,:ed)"), seed_policies)
 
-        # --- 批量生成 297 个客户 + ~350 份保单（100 倍扩容，保持 seed 可识别）---
+        # 批量扩产
         families = list("赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳")
         given_names = ["伟", "芳", "娜", "敏", "静", "丽", "强", "磊", "军", "洋", "勇", "艳", "杰", "娟", "涛", "明", "超", "秀英", "霞", "平", "刚", "桂英", "鑫", "雨桐", "梓涵", "浩然", "子轩", "一诺", "思远", "思琪"]
-        cities = ["北京市海淀区", "广州市天河区", "深圳市南山区", "成都市武侯区", "杭州市西湖区", "南京市鼓楼区", "武汉市洪山区", "西安市雁塔区", "重庆市渝中区", "苏州市工业园区", "沈阳市和平区", "天津市河西区", "郑州市金水区", "长沙市岳麓区", "合肥市蜀山区"]
-        products = ['安心健康保', '终身寿险', '意外险', '重疾险', '百万医疗险', '少儿平安险', '养老年金', '家财险']
-        statuses = ['active', 'active', 'active', 'active', 'expired', 'pending']  # ~67% active
+        cities = ["北京", "上海", "广州", "深圳", "杭州", "成都", "南京", "武汉", "重庆", "西安", "苏州", "天津", "长沙", "青岛", "郑州"]
+        products = ['安心健康保', '终身寿险', '综合意外险', '重疾无忧', '齿科医疗险']
+        statuses = ['active', 'active', 'active', 'expired', 'pending']
 
         cust_batch = []
         pol_batch = []
-        for i in range(4, 301):  # 297 个客户
-            surname = random.choice(families)
-            given = random.choice(given_names)
-            phone = f"1{random.choice(['3', '5', '7', '8', '9'])}{''.join(str(random.randint(0,9)) for _ in range(9))}"
-            cust_batch.append({"id": i, "name": surname + given, "phone": phone, "city": random.choice(cities)})
-
+        for i in range(4, 301):
+            cust_batch.append({
+                "id": i,
+                "name": random.choice(families) + random.choice(given_names),
+                "phone": f"1{random.choice(['3','5','7','8','9'])}{''.join(str(random.randint(0,9)) for _ in range(9))}",
+                "addr": random.choice(cities) + "市某区",
+                "age": 22 + (i % 50),
+            })
             cid = i
-            year = random.randint(2024, 2025)
-            month = random.randint(1, 12)
-            day = random.randint(1, 28)
-            policy_no = f"P{year}{month:02d}{day:02d}{random.randint(1000, 9999)}"
-            premium = round(random.uniform(500, 15000), 2)
-            pol_batch.append({"pn": policy_no, "cid": cid, "prod": random.choice(products), "prem": premium, "st": random.choice(statuses)})
+            p = i - 3  # 保单编号
+            pol_batch.append({
+                "id": 3 + p,
+                "pn": f"P2025{p:06d}",
+                "cid": cid,
+                "prod": random.choice(products),
+                "prem": 1000 + ((i * 17) % 9000),
+                "ia": 100000 + ((i * 31) % 900000),
+                "st": random.choice(statuses),
+                "sd": "2020-01-01",
+                "ed": "2020-01-01",
+            })
 
-            if random.random() < 0.2:  # 约 20% 客户有第二份保单
-                pn2 = f"P{year}{month:02d}{day:02d}{random.randint(1000, 9999)}"
-                prem2 = round(random.uniform(300, 8000), 2)
-                pol_batch.append({"pn": pn2, "cid": cid, "prod": random.choice(products), "prem": prem2, "st": random.choice(statuses)})
-
-        conn.execute(text("INSERT INTO customers VALUES (:id, :name, :phone, :city)"), cust_batch)
-        conn.execute(text("INSERT INTO policies VALUES (:pn, :cid, :prod, :prem, :st)"), pol_batch)
+        conn.execute(text("INSERT INTO customers (id, name, phone, address, age) VALUES (:id,:name,:phone,:addr,:age)"), cust_batch)
+        conn.execute(text("INSERT INTO policies (id, policy_no, customer_id, product, premium, insured_amount, status, start_date, end_date) VALUES (:id,:pn,:cid,:prod,:prem,:ia,:st,:sd,:ed)"), pol_batch)
     yield engine
     engine.dispose()
 

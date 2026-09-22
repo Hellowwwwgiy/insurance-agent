@@ -12,11 +12,11 @@ class Settings(BaseSettings):
     )
 
     deepseek_api_key: str
-    db_user: str
-    db_password: str
-    db_host: str
-    db_port: int
-    db_name: str
+    db_user: str = "insurance"
+    db_password: str = "insurance_pass"
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "insurance_db"
     log_level: str = "INFO"
     log_dir: str = "./logs"
 
