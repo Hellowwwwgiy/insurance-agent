@@ -91,8 +91,6 @@ Info "Service ready!"
 # --- 5. Open browser ---
 Write-Host "`n[5/5] Opening browser..." -ForegroundColor Cyan
 Start-Process "http://localhost:$Port"
-Start-Sleep -Milliseconds 300
-Start-Process "http://localhost:$Port/metrics"
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
