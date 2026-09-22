@@ -22,16 +22,23 @@ try {
     exit 1
 }
 
-# --- 2. Check port ---
+# --- 2. Check port (skip PID=0 TIME_WAIT) ---
 Write-Host "`n[2/5] Checking port $Port..." -ForegroundColor Cyan
-$conn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
-if ($conn) {
+$conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+if ($conn -and $conn.Count -gt 0) {
     $portPid = ($conn | Select-Object -First 1).OwningProcess
-    $pc = Get-Process -Id $portPid -ErrorAction SilentlyContinue
-    if ($pc) {
-        Warn "Port $Port used by PID=$portPid ($($pc.ProcessName)), killing..."
-        Stop-Process -Id $portPid -Force
-        Start-Sleep -Seconds 2
+    if ($portPid -gt 0) {
+        $pc = Get-Process -Id $portPid -ErrorAction SilentlyContinue
+        if ($pc) {
+            Warn "Port $Port used by PID=$portPid ($($pc.ProcessName)), killing..."
+            try {
+                Stop-Process -Id $portPid -Force -ErrorAction Stop
+                Start-Sleep -Seconds 2
+                Info "Killed PID=$portPid"
+            } catch {
+                Warn "Cannot kill PID=$portPid ($($pc.ProcessName)), continuing..."
+            }
+        }
     }
 }
 Info "Port $Port free"
@@ -40,20 +47,28 @@ Info "Port $Port free"
 Write-Host "`n[3/5] Starting uvicorn agent.api:app..." -ForegroundColor Cyan
 $outLog = Join-Path $Root ".uvicorn.out.log"
 $errLog = Join-Path $Root ".uvicorn.err.log"
-if (Test-Path $outLog) { Remove-Item $outLog -Force }
-if (Test-Path $errLog) { Remove-Item $errLog -Force }
+if (Test-Path $outLog) { Remove-Item $outLog -Force -ErrorAction SilentlyContinue }
+if (Test-Path $errLog) { Remove-Item $errLog -Force -ErrorAction SilentlyContinue }
 
 $uvicornProc = Start-Process -FilePath python `
     -ArgumentList "-m","uvicorn","agent.api:app","--host","0.0.0.0","--port","$Port" `
     -RedirectStandardOutput $outLog -RedirectStandardError $errLog `
-    -PassThru
+    -PassThru -WindowStyle Hidden
 
 Info "Uvicorn PID=$($uvicornProc.Id)"
 
-# --- 4. Wait for health ---
+# --- 4. Wait for health (with retries on TIME_WAIT) ---
 Write-Host "`n[4/5] Waiting for /health (max 30s)..." -ForegroundColor Cyan
 $ready = $false
 for ($i = 1; $i -le 30; $i++) {
+    if ($uvicornProc.HasExited) {
+        Fail "Uvicorn exited prematurely (code=$($uvicornProc.ExitCode))"
+        Write-Host "--- STDOUT ---" -ForegroundColor Red
+        if (Test-Path $outLog) { Get-Content $outLog -Tail 20 }
+        Write-Host "--- STDERR ---" -ForegroundColor Red
+        if (Test-Path $errLog) { Get-Content $errLog -Tail 20 }
+        exit 1
+    }
     try {
         $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 2
         if ($r.StatusCode -eq 200) { $ready = $true; break }

@@ -1,6 +1,9 @@
 @echo off
+echo Stopping Insurance Agent (port 8080)...
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080" ^| findstr "LISTENING"') do (
+    echo   Killing PID=%%a...
     taskkill /PID %%a /F >nul 2>&1
 )
+echo Waiting for port release...
+timeout /t 3 >nul
 echo done.
-timeout /t 1 >nul
