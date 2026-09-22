@@ -57,8 +57,10 @@ Info "Port $Port free"
 
 # --- 4. Start uvicorn ---
 Write-Host "`n[4/6] Starting uvicorn agent.api:app..." -ForegroundColor Cyan
-$outLog = Join-Path $Root ".uvicorn.out.log"
-$errLog = Join-Path $Root ".uvicorn.err.log"
+$logDir = Join-Path $Root "logs"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+$outLog = Join-Path $logDir "uvicorn.out.log"
+$errLog = Join-Path $logDir "uvicorn.err.log"
 if (Test-Path $outLog) { Remove-Item $outLog -Force -ErrorAction SilentlyContinue }
 if (Test-Path $errLog) { Remove-Item $errLog -Force -ErrorAction SilentlyContinue }
 
