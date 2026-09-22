@@ -17,22 +17,118 @@
   }
   .container {
     width: 100%;
-    max-width: 720px;
+    max-width: 760px;
     background: #fff;
     border-radius: 16px;
     box-shadow: 0 20px 60px rgba(0,0,0,.25);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    height: 86vh;
+    height: 92vh;
   }
   .header {
     background: linear-gradient(135deg, #667eea, #764ba2);
     color: #fff;
-    padding: 20px 24px;
+    padding: 16px 24px;
+  }
+  .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
   .header h1 { font-size: 20px; font-weight: 600; }
   .header p { font-size: 13px; opacity: .85; margin-top: 4px; }
+
+  /* Metrics toggle */
+  #metrics-toggle {
+    background: rgba(255,255,255,.18);
+    border: 1px solid rgba(255,255,255,.3);
+    color: #fff;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .2s;
+  }
+  #metrics-toggle:hover { background: rgba(255,255,255,.28); }
+  #metrics-toggle .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #4ade80; animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* Metrics panel */
+  .metrics {
+    background: #f0f4ff;
+    border-bottom: 1px solid #e4e7ed;
+    padding: 0 24px;
+    overflow: hidden;
+    transition: max-height .35s ease, padding .25s ease;
+    max-height: 0;
+  }
+  .metrics.open { max-height: 400px; padding: 14px 24px; }
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  .metric-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 10px 12px;
+    text-align: center;
+    border: 1px solid #e4e7ed;
+  }
+  .metric-card .label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-bottom: 4px;
+  }
+  .metric-card .value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric-card .value.green { color: #2ba471; }
+  .metric-card .value.orange { color: #d68500; }
+  .metric-card .value.blue { color: #5b6bc1; }
+  .route-bar {
+    margin-top: 10px;
+    background: #fff;
+    border-radius: 10px;
+    padding: 10px 14px;
+    border: 1px solid #e4e7ed;
+  }
+  .route-bar .label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-bottom: 8px;
+  }
+  .route-items { display: flex; flex-direction: column; gap: 6px; }
+  .route-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+  }
+  .route-item .route { min-width: 110px; color: #555; font-family: monospace; }
+  .route-item .bar-wrap { flex: 1; height: 8px; background: #eef1f8; border-radius: 4px; overflow: hidden; }
+  .route-item .bar { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 4px; transition: width .4s; }
+  .route-item .count { min-width: 40px; text-align: right; color: #333; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .metrics-note {
+    font-size: 11px;
+    color: #999;
+    margin-top: 8px;
+    text-align: right;
+  }
 
   .messages {
     flex: 1;
@@ -103,8 +199,42 @@
 <body>
 <div class="container">
   <div class="header">
-    <h1>🛡️ 保险 SQL 智能助手</h1>
-    <p>自然语言查询保险数据库 · 带事实校验</p>
+    <div class="header-row">
+      <div>
+        <h1>🛡️ 保险 SQL 智能助手</h1>
+        <p>自然语言查询保险数据库 · 带事实校验</p>
+      </div>
+      <button id="metrics-toggle" onclick="toggleMetrics()">
+        <span class="dot"></span>
+        <span id="metrics-label">指标面板</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="metrics" id="metrics-panel">
+    <div class="metric-grid">
+      <div class="metric-card">
+        <div class="label">Total Req</div>
+        <div class="value blue" id="m-total">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">5xx Errors</div>
+        <div class="value green" id="m-5xx">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">P50 Latency</div>
+        <div class="value" id="m-p50">0 ms</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">P95 Latency</div>
+        <div class="value orange" id="m-p95">0 ms</div>
+      </div>
+    </div>
+    <div class="route-bar">
+      <div class="label">Request Routes</div>
+      <div class="route-items" id="m-routes"></div>
+    </div>
+    <div class="metrics-note" id="m-updated">--</div>
   </div>
 
   <div class="messages" id="messages">
@@ -125,16 +255,108 @@ const sendBtn = document.getElementById('send');
 let sessionId = null;
 let streaming = false;
 
+// ============ Metrics ============
+let metricsOn = false;
+let metricsTimer = null;
+
+function toggleMetrics() {
+  const panel = document.getElementById('metrics-panel');
+  const label = document.getElementById('metrics-label');
+  metricsOn = !metricsOn;
+  panel.classList.toggle('open', metricsOn);
+  label.textContent = metricsOn ? 'Hide' : '指标面板';
+  if (metricsOn) {
+    fetchMetrics();
+    metricsTimer = setInterval(fetchMetrics, 3000);
+  } else {
+    clearInterval(metricsTimer);
+    metricsTimer = null;
+  }
+}
+
+async function fetchMetrics() {
+  try {
+    const res = await fetch('/metrics', { cache: 'no-store' });
+    if (!res.ok) return;
+    const text = await res.text();
+    parseAndRenderMetrics(text);
+  } catch (e) { /* silent */ }
+}
+
+function parseAndRenderMetrics(text) {
+  const lines = text.trim().split('\n');
+  const gauges = {};
+  const counters = {};  // label -> value
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    // pattern: metric_name{labels} value  OR  metric_name value
+    const m = line.match(/^(\w+)(?:\{([^}]*)\})?\s+([\d.eE+-]+)/);
+    if (!m) continue;
+    const name = m[1];
+    const labels = m[2] || '';
+    const value = parseFloat(m[3]);
+
+    if (labels) {
+      // parse labels like route="GET /health"
+      const labelObj = {};
+      labels.split(',').forEach(kv => {
+        const eq = kv.indexOf('=');
+        if (eq > 0) labelObj[kv.slice(0,eq).trim()] = kv.slice(eq+1).replace(/^"|"$/g,'');
+      });
+      counters[name + '|' + JSON.stringify(labelObj)] = { labels: labelObj, value };
+    } else {
+      gauges[name] = value;
+    }
+  }
+
+  // Render
+  document.getElementById('m-total').textContent = Math.round(gauges.insurance_request_total || 0);
+  const e5xx = Math.round(gauges.insurance_status_5xx_total || 0);
+  const e5xxEl = document.getElementById('m-5xx');
+  e5xxEl.textContent = e5xx;
+  e5xxEl.className = 'value ' + (e5xx > 0 ? 'orange' : 'green');
+
+  const p50 = gauges.insurance_latency_p50_ms || 0;
+  const p95 = gauges.insurance_latency_p95_ms || 0;
+  document.getElementById('m-p50').textContent = p50.toFixed(1) + ' ms';
+  const p95El = document.getElementById('m-p95');
+  p95El.textContent = p95.toFixed(1) + ' ms';
+  p95El.className = 'value ' + (p95 > 5000 ? 'orange' : (p95 > 1000 ? '' : 'green'));
+
+  // Routes
+  const routes = Object.values(counters)
+    .filter(c => c.labels.route)
+    .sort((a, b) => b.value - a.value);
+  const total = routes.reduce((s, r) => s + r.value, 0) || 1;
+  const routesEl = document.getElementById('m-routes');
+  routesEl.innerHTML = routes.map(r => `
+    <div class="route-item">
+      <span class="route">${escapeHtml(r.labels.route)}</span>
+      <div class="bar-wrap"><div class="bar" style="width:${(r.value/total*100).toFixed(0)}%"></div></div>
+      <span class="count">${r.value}</span>
+    </div>
+  `).join('');
+
+  const now = new Date();
+  document.getElementById('m-updated').textContent = 'Updated ' + now.toLocaleTimeString();
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ============ Chat ============
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
-
 function clearEmpty() {
   const empty = messagesEl.querySelector('.empty');
   if (empty) empty.remove();
 }
-
 function addUser(text) {
   clearEmpty();
   const div = document.createElement('div');
@@ -143,7 +365,6 @@ function addUser(text) {
   messagesEl.appendChild(div);
   scrollBottom();
 }
-
 function createBotMsg() {
   const div = document.createElement('div');
   div.className = 'msg bot';
@@ -154,13 +375,8 @@ function createBotMsg() {
   messagesEl.appendChild(div);
   return { div, content };
 }
-
 function finalizeBot(div, { verified, attempts, error }) {
-  // 错误场景或 attempts=0（完全没跑过校验）不渲染事实校验徽章
-  if (error || !attempts) {
-    scrollBottom();
-    return;
-  }
+  if (error || !attempts) { scrollBottom(); return; }
   const meta = document.createElement('div');
   meta.className = 'meta';
   const v = document.createElement('span');
@@ -173,24 +389,18 @@ function finalizeBot(div, { verified, attempts, error }) {
   div.appendChild(meta);
   scrollBottom();
 }
-
-function scrollBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
+function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 function setLoading(loading) {
   streaming = loading;
   sendBtn.disabled = loading;
   sendBtn.textContent = loading ? '思考中...' : '发送';
 }
-
 function newChat() {
   if (streaming) return;
   sessionId = null;
   messagesEl.innerHTML = '<div class="empty">输入问题，例如：「张三的保费是多少？」</div>';
   input.focus();
 }
-
 async function sendQuery() {
   const q = input.value.trim();
   if (!q || streaming) return;
@@ -198,11 +408,9 @@ async function sendQuery() {
   input.value = '';
   input.style.height = 'auto';
   setLoading(true);
-
   const { div, content } = createBotMsg();
   let cleared = false;
   let finalMeta = { verified: false, attempts: 0 };
-
   try {
     const res = await fetch('/query/stream', {
       method: 'POST',
@@ -210,12 +418,9 @@ async function sendQuery() {
       body: JSON.stringify({ question: q, session_id: sessionId })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let hadError = false;
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -237,8 +442,8 @@ async function sendQuery() {
           scrollBottom();
         } else if (ev.type === 'done') {
           finalMeta = { verified: ev.verified, attempts: ev.attempts, error: false };
+          fetchMetrics(); // refresh metrics right after query
         } else if (ev.type === 'error') {
-          hadError = true;
           if (!cleared) { content.textContent = ''; cleared = true; }
           content.textContent += '\n\n❌ ' + ev.message;
         } else if (ev.type === 'session') {
@@ -257,7 +462,6 @@ async function sendQuery() {
     input.focus();
   }
 }
-
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuery(); }
 });
