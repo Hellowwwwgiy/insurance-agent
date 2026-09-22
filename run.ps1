@@ -13,7 +13,7 @@ Write-Host "  Insurance Agent - One-Click Launcher" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 # --- 1. Check Python ---
-Write-Host "`n[1/5] Checking Python..." -ForegroundColor Cyan
+Write-Host "`n[1/6] Checking Python..." -ForegroundColor Cyan
 try {
     $pyVer = python --version 2>&1
     Info "Python $pyVer"
@@ -22,8 +22,20 @@ try {
     exit 1
 }
 
-# --- 2. Check port (skip PID=0 TIME_WAIT) ---
-Write-Host "`n[2/5] Checking port $Port..." -ForegroundColor Cyan
+# --- 2. Clean Python cache (__pycache__ / .pyc / .pytest_cache) ---
+Write-Host "`n[2/6] Cleaning Python cache..." -ForegroundColor Cyan
+$pycacheDirs = Get-ChildItem -Path $Root -Directory -Recurse -Filter "__pycache__" -ErrorAction SilentlyContinue
+$pycFiles    = Get-ChildItem -Path $Root -File     -Recurse -Filter "*.pyc"      -ErrorAction SilentlyContinue
+$pytestCache = Get-ChildItem -Path $Root -Directory -Recurse -Filter ".pytest_cache" -ErrorAction SilentlyContinue
+$deleteCount = 0
+foreach ($d in $pycacheDirs)  { Remove-Item $d.FullName -Recurse -Force -ErrorAction SilentlyContinue; $deleteCount++ }
+foreach ($f in $pycFiles)     { Remove-Item $f.FullName           -Force -ErrorAction SilentlyContinue; $deleteCount++ }
+foreach ($d in $pytestCache)  { Remove-Item $d.FullName -Recurse -Force -ErrorAction SilentlyContinue; $deleteCount++ }
+if ($deleteCount -gt 0) { Info "Removed $deleteCount cache items (__pycache__ / .pyc / .pytest_cache)" }
+else                    { Info "No cache found" }
+
+# --- 3. Check port (skip PID=0 TIME_WAIT) ---
+Write-Host "`n[3/6] Checking port $Port..." -ForegroundColor Cyan
 $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($conn -and $conn.Count -gt 0) {
     $portPid = ($conn | Select-Object -First 1).OwningProcess
@@ -43,8 +55,8 @@ if ($conn -and $conn.Count -gt 0) {
 }
 Info "Port $Port free"
 
-# --- 3. Start uvicorn ---
-Write-Host "`n[3/5] Starting uvicorn agent.api:app..." -ForegroundColor Cyan
+# --- 4. Start uvicorn ---
+Write-Host "`n[4/6] Starting uvicorn agent.api:app..." -ForegroundColor Cyan
 $outLog = Join-Path $Root ".uvicorn.out.log"
 $errLog = Join-Path $Root ".uvicorn.err.log"
 if (Test-Path $outLog) { Remove-Item $outLog -Force -ErrorAction SilentlyContinue }
@@ -57,8 +69,8 @@ $uvicornProc = Start-Process -FilePath python `
 
 Info "Uvicorn PID=$($uvicornProc.Id)"
 
-# --- 4. Wait for health (with retries on TIME_WAIT) ---
-Write-Host "`n[4/5] Waiting for /health (max 30s)..." -ForegroundColor Cyan
+# --- 5. Wait for health (with retries on TIME_WAIT) ---
+Write-Host "`n[5/6] Waiting for /health (max 30s)..." -ForegroundColor Cyan
 $ready = $false
 for ($i = 1; $i -le 30; $i++) {
     if ($uvicornProc.HasExited) {
@@ -88,8 +100,8 @@ if (-not $ready) {
 }
 Info "Service ready!"
 
-# --- 5. Open browser ---
-Write-Host "`n[5/5] Opening browser..." -ForegroundColor Cyan
+# --- 6. Open browser ---
+Write-Host "`n[6/6] Opening browser..." -ForegroundColor Cyan
 Start-Process "http://localhost:$Port"
 
 Write-Host ""
