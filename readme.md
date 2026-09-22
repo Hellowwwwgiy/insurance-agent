@@ -116,6 +116,9 @@ insurance-agent/
 ├── requirements.txt       # 运行时依赖
 ├── .env.example           # 环境变量示例（不含密钥）
 ├── .dockerignore          # Docker 构建排除规则
+├── run.bat                # 一键启动（Windows 双击）
+├── run.ps1                # 启动脚本主程序
+├── stop.bat               # 一键停止
 ├── Dockerfile             # Web API 镜像（python:3.13-slim + HEALTHCHECK）
 ├── docker-compose.yml     # app + postgres:16-alpine 编排
 ├── docker/
@@ -192,7 +195,26 @@ cp .env.example .env
 
 使用 `docker/init.sql` 初始化表结构和种子数据（297 客户 + 350 保单）。
 
-### 5. 运行 CLI
+### 5. 启动 Web API
+
+**Windows 一键启动**（不需要 PostgreSQL，自动降级 SQLite）：
+
+```bash
+# 双击 run.bat  或  命令行执行：
+.\run.bat
+```
+
+启动后自动弹出浏览器：http://localhost:8080
+
+**手动启动**（需要 PostgreSQL 或 Docker）：
+
+```bash
+uvicorn agent.api:app --host 0.0.0.0 --port 8080
+```
+
+> 💡 **database.py 内置 SQLite 自动降级**：PostgreSQL 连不上时自动切换 SQLite 内存库 + 相同种子数据（300 客户 + 361 保单），任何机器一行命令就能跑。生产环境仍推荐用 PostgreSQL。
+
+### 6. 运行 CLI
 
 ```bash
 python main.py
