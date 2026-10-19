@@ -24,8 +24,19 @@ _CUSTOMER_KEYWORDS = (
     "张三", "李四", "王五", "赵六", "钱七",
 )
 _POLICY_KEYWORDS = (
-    "保单", "保费", "保额", "保单号", "续保", "状态", "有效",
+    "保单", "保费", "保额", "保单号", "状态", "有效",
     "安心健康保", "终身寿险", "综合意外险", "重疾无忧", "齿科", "产品",
+)
+_CLAIM_KEYWORDS = (
+    "理赔", "赔付", "报销", "理赔记录", "理赔金额", "核准",
+    "住院", "手术", "门诊", "意外", "重疾", "出险",
+)
+_UNDERWRITE_KEYWORDS = (
+    "核保", "承保", "加费", "健康告知", "体检", "健康评分",
+    "风险等级", "核保结论", "拒保", "延期",
+)
+_RENEWAL_KEYWORDS = (
+    "续保", "续期", "续保折扣", "续保状态", "到期",
 )
 _JOIN_KEYWORDS = (
     "哪些客户", "有多少客户", "所有客户", "客户的保单", "每个客户",
@@ -37,18 +48,31 @@ def _supervisor_route(query: str) -> str:
     """规则路由：根据关键词决定走哪个 SQL 专家 Agent
 
     Returns:
-        "customer"  → CustomerAgent  （客户基础数据）
-        "policy"    → PolicyAgent    （保单/产品数据）
-        "join"      → JoinAgent      （跨表 JOIN 查询）
+        "customer"    → CustomerAgent    （客户基础数据）
+        "policy"      → PolicyAgent      （保单/产品数据）
+        "claim"       → ClaimAgent       （理赔记录）
+        "underwriting"→ UnderwriteAgent  （核保记录）
+        "renewal"     → RenewalAgent     （续保记录）
+        "join"        → JoinAgent        （跨表 JOIN 查询）
     """
     q = query.lower()
     has_customer = any(k in q for k in _CUSTOMER_KEYWORDS)
     has_policy = any(k in q for k in _POLICY_KEYWORDS)
+    has_claim = any(k in q for k in _CLAIM_KEYWORDS)
+    has_uw = any(k in q for k in _UNDERWRITE_KEYWORDS)
+    has_renewal = any(k in q for k in _RENEWAL_KEYWORDS)
     has_join = any(k in q for k in _JOIN_KEYWORDS)
 
-    # 有 join 触发词 或 同时涉及客户和保单 → JoinAgent
-    if has_join or (has_customer and has_policy):
+    # 有 join 触发词 或 同时涉及多个业务域 → JoinAgent
+    domain_count = sum([has_customer, has_policy, has_claim, has_uw, has_renewal])
+    if has_join or domain_count >= 2:
         return "join"
+    if has_claim:
+        return "claim"
+    if has_uw:
+        return "underwriting"
+    if has_renewal:
+        return "renewal"
     if has_policy:
         return "policy"
     if has_customer:
@@ -75,11 +99,40 @@ POLICY_AGENT_PROMPT = """你是保单数据专家。根据用户问题，使用 
 3. 生成 SQL 后用 check_sql 校验，再用 execute_sql 执行。
 4. 严禁编造任何保单数据。"""
 
-JOIN_AGENT_PROMPT = """你是复杂查询专家。根据用户问题，需要跨表 JOIN 查询 customers 和 policies。
+CLAIM_AGENT_PROMPT = """你是理赔数据专家。根据用户问题，使用 SQL 工具查询 claims 表。
 
 规则：
-1. 先调用 list_tables + get_table_schema 了解表结构。
-2. 需要同时查客户和保单时，用 JOIN customers ON policies.customer_id = customers.id。
+1. 先调用 list_tables 确认可用表，再用 get_table_schema 确认 claims 表结构。
+2. 只涉及理赔记录（理赔单号、理赔类型、申请金额、核准金额、理赔状态）时，优先查 claims 表。
+3. 如需关联客户/保单信息，用 JOIN policies ON claims.policy_id = policies.id。
+4. 生成 SQL 后用 check_sql 校验，再用 execute_sql 执行。
+5. 严禁编造任何理赔数据。"""
+
+UNDERWRITE_AGENT_PROMPT = """你是核保数据专家。根据用户问题，使用 SQL 工具查询 underwriting 表。
+
+规则：
+1. 先调用 list_tables 确认可用表，再用 get_table_schema 确认 underwriting 表结构。
+2. 只涉及核保记录（健康评分、风险等级、核保决定、加费比例）时，优先查 underwriting 表。
+3. 生成 SQL 后用 check_sql 校验，再用 execute_sql 执行。
+4. 严禁编造任何核保数据。"""
+
+RENEWAL_AGENT_PROMPT = """你是续保数据专家。根据用户问题，使用 SQL 工具查询 renewal 表。
+
+规则：
+1. 先调用 list_tables 确认可用表，再用 get_table_schema 确认 renewal 表结构。
+2. 只涉及续保记录（续保日期、续保状态、续保保费、折扣率）时，优先查 renewal 表。
+3. 生成 SQL 后用 check_sql 校验，再用 execute_sql 执行。
+4. 严禁编造任何续保数据。"""
+
+JOIN_AGENT_PROMPT = """你是复杂查询专家。根据用户问题，需要跨表 JOIN 查询 customers、policies、claims、underwriting、renewal。
+
+规则：
+1. 先调用 list_tables + get_table_schema 了解所有表结构。
+2. 跨表查询时，用合适的 JOIN：
+   - customers ← policies（policies.customer_id = customers.id）
+   - policies ← claims（claims.policy_id = policies.id）
+   - policies ← underwriting（underwriting.policy_id = policies.id）
+   - policies ← renewal（renewal.policy_id = policies.id）
 3. 生成 SQL 后用 check_sql 校验，注意只允许 SELECT/WITH 单条语句。
 4. 严禁编造任何数据，如实回答。"""
 
@@ -174,6 +227,18 @@ class EnhancedAgentWithSelfCheck:
             model=llm, tools=tools, system_prompt=JOIN_AGENT_PROMPT,
             debug=False, name="join_agent",
         ) if db else base_agent
+        self.claim_agent = create_langchain_agent(
+            model=llm, tools=tools, system_prompt=CLAIM_AGENT_PROMPT,
+            debug=False, name="claim_agent",
+        ) if db else base_agent
+        self.underwrite_agent = create_langchain_agent(
+            model=llm, tools=tools, system_prompt=UNDERWRITE_AGENT_PROMPT,
+            debug=False, name="underwrite_agent",
+        ) if db else base_agent
+        self.renewal_agent = create_langchain_agent(
+            model=llm, tools=tools, system_prompt=RENEWAL_AGENT_PROMPT,
+            debug=False, name="renewal_agent",
+        ) if db else base_agent
 
         self.graph = self._build_graph()
 
@@ -224,6 +289,9 @@ class EnhancedAgentWithSelfCheck:
         agent_map = {
             "customer": self.customer_agent,
             "policy": self.policy_agent,
+            "claim": self.claim_agent,
+            "underwriting": self.underwrite_agent,
+            "renewal": self.renewal_agent,
             "join": self.join_agent,
         }
         agent = agent_map.get(specialist, self.join_agent)
@@ -348,6 +416,9 @@ class EnhancedAgentWithSelfCheck:
         agent_map = {
             "customer": self.customer_agent,
             "policy": self.policy_agent,
+            "claim": self.claim_agent,
+            "underwriting": self.underwrite_agent,
+            "renewal": self.renewal_agent,
             "join": self.join_agent,
         }
         agent = agent_map.get(specialist, self.join_agent)

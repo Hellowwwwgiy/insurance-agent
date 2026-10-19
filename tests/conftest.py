@@ -296,6 +296,46 @@ def sqlite_engine():
                 end_date TEXT
             )
         """))
+        conn.execute(text("""
+            CREATE TABLE claims (
+                id INTEGER PRIMARY KEY,
+                claim_no TEXT UNIQUE NOT NULL,
+                policy_id INTEGER NOT NULL,
+                customer_id INTEGER NOT NULL,
+                claim_date TEXT,
+                claim_type TEXT,
+                claim_amount REAL,
+                approved_amount REAL,
+                status TEXT DEFAULT 'pending',
+                description TEXT
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE underwriting (
+                id INTEGER PRIMARY KEY,
+                policy_id INTEGER NOT NULL,
+                customer_id INTEGER NOT NULL,
+                underwrite_date TEXT,
+                health_score INTEGER,
+                risk_level TEXT,
+                decision TEXT,
+                extra_premium_rate REAL,
+                notes TEXT
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE renewal (
+                id INTEGER PRIMARY KEY,
+                policy_id INTEGER NOT NULL,
+                customer_id INTEGER NOT NULL,
+                renewal_date TEXT,
+                previous_end_date TEXT,
+                new_end_date TEXT,
+                premium REAL,
+                status TEXT DEFAULT 'pending',
+                discount_rate REAL
+            )
+        """))
 
         # 种子（与 init.sql 一致）
         seed_customers = [
@@ -310,6 +350,24 @@ def sqlite_engine():
         ]
         conn.execute(text("INSERT INTO customers (id, name, phone, address, age) VALUES (:id,:name,:phone,:addr,:age)"), seed_customers)
         conn.execute(text("INSERT INTO policies (id, policy_no, customer_id, product, premium, insured_amount, status, start_date, end_date) VALUES (:id,:pn,:cid,:prod,:prem,:ia,:st,:sd,:ed)"), seed_policies)
+        # 种子理赔/核保/续保（与 init.sql 一致）
+        seed_claims = [
+            {"id": 1, "cn": 'C202501001', "pid": 1, "cid": 1, "cd": '2025-06-10', "ct": '住院', "cam": 28000.0, "aam": 24500.0, "st": 'paid',  "desc": '急性阑尾炎住院手术'},
+            {"id": 2, "cn": 'C202501002', "pid": 1, "cid": 1, "cd": '2025-09-15', "ct": '门诊', "cam": 3200.0,  "aam": 2800.0,  "st": 'paid',  "desc": '常规体检门诊复查'},
+            {"id": 3, "cn": 'C202501003', "pid": 3, "cid": 3, "cd": '2024-03-20', "ct": '意外', "cam": 15000.0, "aam": 12000.0, "st": 'paid',  "desc": '交通事故意外医疗'},
+        ]
+        seed_uw = [
+            {"id": 1, "pid": 1, "cid": 1, "ud": '2025-04-01', "hs": 85, "rl": 'low',    "dec": 'approved',      "epr": 0.0,  "notes": '体检正常，标准承保'},
+            {"id": 2, "pid": 2, "cid": 1, "ud": '2024-01-10', "hs": 78, "rl": 'medium', "dec": 'extra_premium', "epr": 0.15, "notes": '轻度脂肪肝，加费 15%'},
+            {"id": 3, "pid": 3, "cid": 3, "ud": '2023-05-28', "hs": 92, "rl": 'low',    "dec": 'approved',      "epr": 0.0,  "notes": '健康状况良好'},
+        ]
+        seed_renew = [
+            {"id": 1, "pid": 2, "cid": 1, "rd": '2024-01-10', "ped": '2024-01-14', "ned": '2075-01-14', "prem": 3000.0, "st": 'confirmed', "dr": 0.0},
+            {"id": 2, "pid": 3, "cid": 3, "rd": '2024-05-20', "ped": '2024-05-31', "ned": None,          "prem": 1800.0, "st": 'lapsed',    "dr": None},
+        ]
+        conn.execute(text("INSERT INTO claims (id, claim_no, policy_id, customer_id, claim_date, claim_type, claim_amount, approved_amount, status, description) VALUES (:id,:cn,:pid,:cid,:cd,:ct,:cam,:aam,:st,:desc)"), seed_claims)
+        conn.execute(text("INSERT INTO underwriting (id, policy_id, customer_id, underwrite_date, health_score, risk_level, decision, extra_premium_rate, notes) VALUES (:id,:pid,:cid,:ud,:hs,:rl,:dec,:epr,:notes)"), seed_uw)
+        conn.execute(text("INSERT INTO renewal (id, policy_id, customer_id, renewal_date, previous_end_date, new_end_date, premium, status, discount_rate) VALUES (:id,:pid,:cid,:rd,:ped,:ned,:prem,:st,:dr)"), seed_renew)
 
         # 批量扩产
         families = list("赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳")
@@ -317,9 +375,17 @@ def sqlite_engine():
         cities = ["北京", "上海", "广州", "深圳", "杭州", "成都", "南京", "武汉", "重庆", "西安", "苏州", "天津", "长沙", "青岛", "郑州"]
         products = ['安心健康保', '终身寿险', '综合意外险', '重疾无忧', '齿科医疗险']
         statuses = ['active', 'active', 'active', 'expired', 'pending']
+        claim_types = ['住院', '手术', '门诊', '意外', '重疾']
+        claim_statuses = ['pending', 'approved', 'rejected', 'paid', 'paid']
+        risk_levels = ['low', 'low', 'low', 'medium', 'high']
+        uw_decisions = ['approved', 'approved', 'approved', 'rejected', 'extra_premium']
+        renewal_statuses = ['confirmed', 'confirmed', 'lapsed', 'pending']
 
         cust_batch = []
         pol_batch = []
+        claim_batch = []
+        uw_batch = []
+        renew_batch = []
         for i in range(4, 301):
             cust_batch.append({
                 "id": i,
@@ -330,6 +396,7 @@ def sqlite_engine():
             })
             cid = i
             p = i - 3  # 保单编号
+            pol_st = random.choice(statuses)
             pol_batch.append({
                 "id": 3 + p,
                 "pn": f"P2025{p:06d}",
@@ -337,13 +404,60 @@ def sqlite_engine():
                 "prod": random.choice(products),
                 "prem": 1000 + ((i * 17) % 9000),
                 "ia": 100000 + ((i * 31) % 900000),
-                "st": random.choice(statuses),
+                "st": pol_st,
                 "sd": "2020-01-01",
                 "ed": "2020-01-01",
             })
+            # 每个保单 1 条核保（id 从 4 开始，避开种子 1-3）
+            uw_dec = random.choice(uw_decisions)
+            uw_batch.append({
+                "id": len(uw_batch) + 4,
+                "pid": 3 + p,
+                "cid": cid,
+                "ud": "2020-01-01",
+                "hs": random.randint(60, 99),
+                "rl": random.choice(risk_levels),
+                "dec": uw_dec,
+                "epr": round(random.uniform(0.05, 0.3), 2) if uw_dec == 'extra_premium' else 0.0,
+                "notes": "自动生成核保记录",
+            })
+            # 30% 保单有理赔
+            if p % 3 == 0:
+                claim_batch.append({
+                    "id": len(claim_batch) + 4,
+                    "cn": f"C{p:08d}",
+                    "pid": 3 + p,
+                    "cid": cid,
+                    "cd": "2020-03-01",
+                    "ct": random.choice(claim_types),
+                    "cam": random.randint(5000, 100000),
+                    "aam": random.randint(4000, 80000),
+                    "st": random.choice(claim_statuses),
+                    "desc": "自动生成理赔记录",
+                })
+            # expired 保单有续保记录
+            if pol_st == 'expired':
+                renew_st = random.choice(renewal_statuses)
+                renew_batch.append({
+                    "id": len(renew_batch) + 3,
+                    "pid": 3 + p,
+                    "cid": cid,
+                    "rd": "2020-01-01",
+                    "ped": "2020-01-01",
+                    "ned": None,
+                    "prem": 1000 + ((i * 17) % 9000),
+                    "st": renew_st,
+                    "dr": 0.05 if renew_st == 'confirmed' else None,
+                })
 
         conn.execute(text("INSERT INTO customers (id, name, phone, address, age) VALUES (:id,:name,:phone,:addr,:age)"), cust_batch)
         conn.execute(text("INSERT INTO policies (id, policy_no, customer_id, product, premium, insured_amount, status, start_date, end_date) VALUES (:id,:pn,:cid,:prod,:prem,:ia,:st,:sd,:ed)"), pol_batch)
+        if claim_batch:
+            conn.execute(text("INSERT INTO claims (id, claim_no, policy_id, customer_id, claim_date, claim_type, claim_amount, approved_amount, status, description) VALUES (:id,:cn,:pid,:cid,:cd,:ct,:cam,:aam,:st,:desc)"), claim_batch)
+        if uw_batch:
+            conn.execute(text("INSERT INTO underwriting (id, policy_id, customer_id, underwrite_date, health_score, risk_level, decision, extra_premium_rate, notes) VALUES (:id,:pid,:cid,:ud,:hs,:rl,:dec,:epr,:notes)"), uw_batch)
+        if renew_batch:
+            conn.execute(text("INSERT INTO renewal (id, policy_id, customer_id, renewal_date, previous_end_date, new_end_date, premium, status, discount_rate) VALUES (:id,:pid,:cid,:rd,:ped,:ned,:prem,:st,:dr)"), renew_batch)
     yield engine
     engine.dispose()
 

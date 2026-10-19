@@ -155,8 +155,14 @@ async def _bench_offline(
         with engine.begin() as conn:
             conn.execute(text("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, phone TEXT, address TEXT, age INTEGER)"))
             conn.execute(text("CREATE TABLE policies (id INTEGER PRIMARY KEY, policy_no TEXT UNIQUE NOT NULL, customer_id INTEGER NOT NULL, product TEXT, premium REAL, insured_amount REAL, status TEXT DEFAULT 'active', start_date TEXT, end_date TEXT)"))
+            conn.execute(text("CREATE TABLE claims (id INTEGER PRIMARY KEY, claim_no TEXT UNIQUE NOT NULL, policy_id INTEGER NOT NULL, customer_id INTEGER NOT NULL, claim_date TEXT, claim_type TEXT, claim_amount REAL, approved_amount REAL, status TEXT DEFAULT 'pending', description TEXT)"))
+            conn.execute(text("CREATE TABLE underwriting (id INTEGER PRIMARY KEY, policy_id INTEGER NOT NULL, customer_id INTEGER NOT NULL, underwrite_date TEXT, health_score INTEGER, risk_level TEXT, decision TEXT, extra_premium_rate REAL, notes TEXT)"))
+            conn.execute(text("CREATE TABLE renewal (id INTEGER PRIMARY KEY, policy_id INTEGER NOT NULL, customer_id INTEGER NOT NULL, renewal_date TEXT, previous_end_date TEXT, new_end_date TEXT, premium REAL, status TEXT DEFAULT 'pending', discount_rate REAL)"))
             conn.execute(text("INSERT INTO customers VALUES (1, '张三', '13800138000', '北京朝阳', 32)"))
             conn.execute(text("INSERT INTO policies VALUES (1, 'P001', 1, '安心健康保', 3200.0, 500000.0, 'active', '2025-01-01', '2045-01-01')"))
+            conn.execute(text("INSERT INTO claims VALUES (1, 'C001', 1, 1, '2025-06-10', '住院', 28000.0, 24500.0, 'paid', '阑尾炎手术')"))
+            conn.execute(text("INSERT INTO underwriting VALUES (1, 1, 1, '2025-04-01', 85, 'low', 'approved', 0.0, '标准承保')"))
+            conn.execute(text("INSERT INTO renewal VALUES (1, 1, 1, '2025-01-01', '2025-01-01', '2026-01-01', 3200.0, 'confirmed', 0.05)"))
         agent_logger = _logging.getLogger(f"bench-{id(engine)}")
         agent_logger.setLevel(_logging.WARNING)  # 压测时只打 warning+，避免日志刷屏
         agent_logger.addHandler(_logging.NullHandler())
